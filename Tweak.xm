@@ -92,7 +92,6 @@ static void WMPFScanVisibleMenu(void) {
 
         [result appendFormat:@"keyWindow=%@\n", NSStringFromClass(keyWindow.class)];
 
-        for (UIWindow *window in UIApplication.sharedApplication.connectedScenes.allObjects.firstObject ? @[] : @[]) {}
 
         NSArray *windows = nil;
         NSMutableArray *allWindows = [NSMutableArray array];
