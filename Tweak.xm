@@ -1,6 +1,10 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
+static BOOL WMPFIsMenuItemView(UIView *view) {
+    return [NSStringFromClass(view.class) isEqualToString:@"MMMenuItemView"];
+}
+
 static NSString *WMPFTextOfView(UIView *view) {
     if ([view isKindOfClass:UILabel.class]) {
         return ((UILabel *)view).text;
@@ -14,51 +18,27 @@ static NSString *WMPFTextOfView(UIView *view) {
     return nil;
 }
 
-static void WMPFCollectTexts(UIView *view, NSMutableString *result, NSInteger depth) {
-    if (!view || depth > 8) return;
-
-    NSString *text = WMPFTextOfView(view);
-    if (text.length > 0) {
-        [result appendFormat:@"text=%@ | view=%@ | super=%@ | frame=%@\n",
-         text,
-         NSStringFromClass(view.class),
-         NSStringFromClass(view.superview.class),
-         NSStringFromCGRect(view.frame)];
+static UILabel *WMPFFindLabel(UIView *view) {
+    if ([view isKindOfClass:UILabel.class]) {
+        return (UILabel *)view;
     }
 
     for (UIView *subview in view.subviews) {
-        WMPFCollectTexts(subview, result, depth + 1);
+        UILabel *label = WMPFFindLabel(subview);
+        if (label) return label;
     }
+
+    return nil;
 }
 
 static UIViewController *WMPFRootViewController(void) {
-    UIWindow *targetWindow = nil;
-
     for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
         if (![scene isKindOfClass:UIWindowScene.class]) continue;
 
         UIWindowScene *windowScene = (UIWindowScene *)scene;
         for (UIWindow *window in windowScene.windows) {
             if (window.isKeyWindow) {
-                targetWindow = window;
-                break;
-            }
-        }
-
-        if (targetWindow) break;
-    }
-
-    return targetWindow.rootViewController;
-}
-
-static UIWindow *WMPFKeyWindow(void) {
-    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
-        if (![scene isKindOfClass:UIWindowScene.class]) continue;
-
-        UIWindowScene *windowScene = (UIWindowScene *)scene;
-        for (UIWindow *window in windowScene.windows) {
-            if (window.isKeyWindow) {
-                return window;
+                return window.rootViewController;
             }
         }
     }
@@ -66,84 +46,169 @@ static UIWindow *WMPFKeyWindow(void) {
     return nil;
 }
 
-static void WMPFShowResult(NSString *message) {
+static void WMPFShowAlert(NSString *title, NSString *message) {
     dispatch_async(dispatch_get_main_queue(), ^{
         UIViewController *root = WMPFRootViewController();
         if (!root) return;
 
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"WMPF 菜单扫描结果"
-                                                                       message:@"已复制到剪贴板，发给我分析。"
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+                                                                       message:message
                                                                 preferredStyle:UIAlertControllerStyleAlert];
 
         [alert addAction:[UIAlertAction actionWithTitle:@"确定"
                                                   style:UIAlertActionStyleDefault
                                                 handler:nil]];
 
-        UIPasteboard.generalPasteboard.string = message;
-
         [root presentViewController:alert animated:YES completion:nil];
     });
 }
 
-static void WMPFScanVisibleMenu(void) {
-    static BOOL scanning = NO;
-    if (scanning) return;
-    scanning = YES;
+@interface WMPFForwardTarget : NSObject
++ (instancetype)shared;
+- (void)forwardTapped;
+@end
 
-    NSArray *delays = @[@1.0, @2.0, @3.0];
+@implementation WMPFForwardTarget
 
-    for (NSNumber *delayNumber in delays) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delayNumber.doubleValue * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            NSMutableString *result = [NSMutableString string];
++ (instancetype)shared {
+    static WMPFForwardTarget *target = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        target = [WMPFForwardTarget new];
+    });
+    return target;
+}
 
-            NSMutableArray *allWindows = [NSMutableArray array];
+- (void)forwardTapped {
+    WMPFShowAlert(@"WMPF", @"已点击转发按钮。下一步接入微信原生转发逻辑。");
+}
 
-            for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
-                if (![scene isKindOfClass:UIWindowScene.class]) continue;
+@end
 
-                UIWindowScene *windowScene = (UIWindowScene *)scene;
-                [allWindows addObjectsFromArray:windowScene.windows];
-            }
+static void WMPFCollectMenuItems(UIView *view, NSMutableArray<UIView *> *items) {
+    if (!view) return;
 
-            [result appendFormat:@"scanDelay=%@\n", delayNumber];
-
-            for (UIWindow *window in allWindows) {
-                [result appendFormat:@"\nWINDOW %@ hidden=%d alpha=%.2f level=%.2f frame=%@\n",
-                 NSStringFromClass(window.class),
-                 window.hidden,
-                 window.alpha,
-                 window.windowLevel,
-                 NSStringFromCGRect(window.frame)];
-
-                WMPFCollectTexts(window, result, 0);
-            }
-
-            if ([result containsString:@"收藏"] ||
-                [result containsString:@"引用"] ||
-                [result containsString:@"多选"] ||
-                [result containsString:@"从当前听"]) {
-                UIPasteboard.generalPasteboard.string = result;
-                WMPFShowResult(result);
-                scanning = NO;
-            }
-        });
+    if (WMPFIsMenuItemView(view)) {
+        UILabel *label = WMPFFindLabel(view);
+        if (label.text.length > 0) {
+            [items addObject:view];
+        }
     }
 
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        scanning = NO;
+    for (UIView *subview in view.subviews) {
+        WMPFCollectMenuItems(subview, items);
+    }
+}
+
+static BOOL WMPFMenuAlreadyHasForward(NSArray<UIView *> *items) {
+    for (UIView *item in items) {
+        UILabel *label = WMPFFindLabel(item);
+        if ([label.text isEqualToString:@"转发"]) {
+            return YES;
+        }
+    }
+
+    return NO;
+}
+
+static UIView *WMPFFindLikelyContainer(NSArray<UIView *> *items) {
+    NSMutableDictionary<NSValue *, NSNumber *> *counts = [NSMutableDictionary dictionary];
+
+    for (UIView *item in items) {
+        UIView *superview = item.superview;
+        if (!superview) continue;
+
+        NSValue *key = [NSValue valueWithNonretainedObject:superview];
+        counts[key] = @([counts[key] integerValue] + 1);
+    }
+
+    UIView *bestSuperview = nil;
+    NSInteger bestCount = 0;
+
+    for (NSValue *key in counts) {
+        NSInteger count = counts[key].integerValue;
+        if (count > bestCount) {
+            bestCount = count;
+            bestSuperview = key.nonretainedObjectValue;
+        }
+    }
+
+    return bestSuperview;
+}
+
+static void WMPFInjectForwardButton(UIWindow *menuWindow) {
+    NSMutableArray<UIView *> *items = [NSMutableArray array];
+    WMPFCollectMenuItems(menuWindow, items);
+
+    if (items.count == 0 || WMPFMenuAlreadyHasForward(items)) return;
+
+    UIView *sourceItem = nil;
+    for (UIView *item in items) {
+        UILabel *label = WMPFFindLabel(item);
+        if ([label.text isEqualToString:@"从当前听"]) {
+            sourceItem = item;
+            break;
+        }
+    }
+
+    if (!sourceItem) {
+        sourceItem = items.lastObject;
+    }
+
+    UIView *container = WMPFFindLikelyContainer(items);
+    if (!container || !sourceItem) return;
+
+    NSData *archivedData = [NSKeyedArchiver archivedDataWithRootObject:sourceItem requiringSecureCoding:NO error:nil];
+    UIView *forwardItem = [NSKeyedUnarchiver unarchivedObjectOfClass:UIView.class fromData:archivedData error:nil];
+
+    if (!forwardItem) return;
+
+    UILabel *label = WMPFFindLabel(forwardItem);
+    label.text = @"转发";
+
+    CGRect frame = sourceItem.frame;
+    frame.origin.x += frame.size.width + 8;
+    forwardItem.frame = frame;
+
+    UITapGestureRecognizer *tap =
+        [[UITapGestureRecognizer alloc] initWithTarget:[WMPFForwardTarget shared]
+                                                action:@selector(forwardTapped)];
+    [forwardItem addGestureRecognizer:tap];
+    forwardItem.userInteractionEnabled = YES;
+
+    [container addSubview:forwardItem];
+}
+
+static void WMPFTryInjectMenu(void) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+            if (![scene isKindOfClass:UIWindowScene.class]) continue;
+
+            UIWindowScene *windowScene = (UIWindowScene *)scene;
+            for (UIWindow *window in windowScene.windows) {
+                if ([NSStringFromClass(window.class) isEqualToString:@"MMMenuWindow"]) {
+                    WMPFInjectForwardButton(window);
+                }
+            }
+        }
     });
 }
 
-%hook MicroMessengerAppDelegate
+%hook MMMenuWindow
 
-- (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
-    BOOL result = %orig;
+- (void)didMoveToWindow {
+    %orig;
+    WMPFTryInjectMenu();
+}
 
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        NSLog(@"[WMPF] loaded");
-    });
+- (void)didAddSubview:(UIView *)subview {
+    %orig;
+    WMPFTryInjectMenu();
+}
 
-    return result;
+- (void)layoutSubviews {
+    %orig;
+    WMPFTryInjectMenu();
 }
 
 %end
@@ -153,10 +218,10 @@ static void WMPFScanVisibleMenu(void) {
 - (void)setState:(UIGestureRecognizerState)state {
     %orig;
 
-    if (state == UIGestureRecognizerStateEnded ||
-        state == UIGestureRecognizerStateBegan ||
-        state == UIGestureRecognizerStateChanged) {
-        WMPFScanVisibleMenu();
+    if (state == UIGestureRecognizerStateBegan ||
+        state == UIGestureRecognizerStateChanged ||
+        state == UIGestureRecognizerStateEnded) {
+        WMPFTryInjectMenu();
     }
 }
 
