@@ -86,35 +86,51 @@ static void WMPFShowResult(NSString *message) {
 }
 
 static void WMPFScanVisibleMenu(void) {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        NSMutableString *result = [NSMutableString string];
-        UIWindow *keyWindow = WMPFKeyWindow();
+    static BOOL scanning = NO;
+    if (scanning) return;
+    scanning = YES;
 
-        [result appendFormat:@"keyWindow=%@\n", NSStringFromClass(keyWindow.class)];
+    NSArray *delays = @[@1.0, @2.0, @3.0];
 
+    for (NSNumber *delayNumber in delays) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delayNumber.doubleValue * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            NSMutableString *result = [NSMutableString string];
 
-        NSArray *windows = nil;
-        NSMutableArray *allWindows = [NSMutableArray array];
+            NSMutableArray *allWindows = [NSMutableArray array];
 
-        for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
-            if (![scene isKindOfClass:UIWindowScene.class]) continue;
+            for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+                if (![scene isKindOfClass:UIWindowScene.class]) continue;
 
-            UIWindowScene *windowScene = (UIWindowScene *)scene;
-            [allWindows addObjectsFromArray:windowScene.windows];
-        }
+                UIWindowScene *windowScene = (UIWindowScene *)scene;
+                [allWindows addObjectsFromArray:windowScene.windows];
+            }
 
-        windows = allWindows;
+            [result appendFormat:@"scanDelay=%@\n", delayNumber];
 
-        for (UIWindow *window in windows) {
-            [result appendFormat:@"\nWINDOW %@ hidden=%d frame=%@\n",
-             NSStringFromClass(window.class),
-             window.hidden,
-             NSStringFromCGRect(window.frame)];
+            for (UIWindow *window in allWindows) {
+                [result appendFormat:@"\nWINDOW %@ hidden=%d alpha=%.2f level=%.2f frame=%@\n",
+                 NSStringFromClass(window.class),
+                 window.hidden,
+                 window.alpha,
+                 window.windowLevel,
+                 NSStringFromCGRect(window.frame)];
 
-            WMPFCollectTexts(window, result, 0);
-        }
+                WMPFCollectTexts(window, result, 0);
+            }
 
-        WMPFShowResult(result);
+            if ([result containsString:@"收藏"] ||
+                [result containsString:@"引用"] ||
+                [result containsString:@"多选"] ||
+                [result containsString:@"从当前听"]) {
+                UIPasteboard.generalPasteboard.string = result;
+                WMPFShowResult(result);
+                scanning = NO;
+            }
+        });
+    }
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        scanning = NO;
     });
 }
 
@@ -137,7 +153,9 @@ static void WMPFScanVisibleMenu(void) {
 - (void)setState:(UIGestureRecognizerState)state {
     %orig;
 
-    if (state == UIGestureRecognizerStateBegan) {
+    if (state == UIGestureRecognizerStateEnded ||
+        state == UIGestureRecognizerStateBegan ||
+        state == UIGestureRecognizerStateChanged) {
         WMPFScanVisibleMenu();
     }
 }
