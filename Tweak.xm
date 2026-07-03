@@ -1,99 +1,122 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
-static void WMPFShowAlert(NSString *title, NSString *message) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-UIViewController *root = nil;
-for (UIWindow *window in UIApplication.sharedApplication.windows) {
-    if (window.isKeyWindow) {
-        root = window.rootViewController;
-        break;
+static NSString *WMPFTextOfView(UIView *view) {
+    if ([view isKindOfClass:UILabel.class]) {
+        return ((UILabel *)view).text;
+    }
+
+    if ([view isKindOfClass:UIButton.class]) {
+        UIButton *button = (UIButton *)view;
+        return button.currentTitle ?: button.titleLabel.text;
+    }
+
+    return nil;
+}
+
+static void WMPFCollectTexts(UIView *view, NSMutableString *result, NSInteger depth) {
+    if (!view || depth > 8) return;
+
+    NSString *text = WMPFTextOfView(view);
+    if (text.length > 0) {
+        [result appendFormat:@"text=%@ | view=%@ | super=%@ | frame=%@\n",
+         text,
+         NSStringFromClass(view.class),
+         NSStringFromClass(view.superview.class),
+         NSStringFromCGRect(view.frame)];
+    }
+
+    for (UIView *subview in view.subviews) {
+        WMPFCollectTexts(subview, result, depth + 1);
     }
 }
 
+static UIViewController *WMPFRootViewController(void) {
+    UIWindow *targetWindow = nil;
+
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+
+        UIWindowScene *windowScene = (UIWindowScene *)scene;
+        for (UIWindow *window in windowScene.windows) {
+            if (window.isKeyWindow) {
+                targetWindow = window;
+                break;
+            }
+        }
+
+        if (targetWindow) break;
+    }
+
+    return targetWindow.rootViewController;
+}
+
+static UIWindow *WMPFKeyWindow(void) {
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+
+        UIWindowScene *windowScene = (UIWindowScene *)scene;
+        for (UIWindow *window in windowScene.windows) {
+            if (window.isKeyWindow) {
+                return window;
+            }
+        }
+    }
+
+    return nil;
+}
+
+static void WMPFShowResult(NSString *message) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIViewController *root = WMPFRootViewController();
         if (!root) return;
 
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
-                                                                       message:message
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"WMPF 菜单扫描结果"
+                                                                       message:@"已复制到剪贴板，发给我分析。"
                                                                 preferredStyle:UIAlertControllerStyleAlert];
 
-        [alert addAction:[UIAlertAction actionWithTitle:@"复制"
-                                                  style:UIAlertActionStyleDefault
-                                                handler:^(__unused UIAlertAction *action) {
-            UIPasteboard.generalPasteboard.string = message;
-        }]];
-
         [alert addAction:[UIAlertAction actionWithTitle:@"确定"
-                                                  style:UIAlertActionStyleCancel
+                                                  style:UIAlertActionStyleDefault
                                                 handler:nil]];
+
+        UIPasteboard.generalPasteboard.string = message;
 
         [root presentViewController:alert animated:YES completion:nil];
     });
 }
 
-static NSString *WMPFStringField(id object, NSString *key) {
-    @try {
-        id value = [object valueForKey:key];
-        return [value isKindOfClass:NSString.class] ? value : nil;
-    } @catch (__unused NSException *exception) {
-        return nil;
-    }
-}
+static void WMPFScanVisibleMenu(void) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        NSMutableString *result = [NSMutableString string];
+        UIWindow *keyWindow = WMPFKeyWindow();
 
-static NSString *WMPFNumberField(id object, NSString *key) {
-    @try {
-        id value = [object valueForKey:key];
-        if ([value isKindOfClass:NSNumber.class]) {
-            return [value description];
+        [result appendFormat:@"keyWindow=%@\n", NSStringFromClass(keyWindow.class)];
+
+        for (UIWindow *window in UIApplication.sharedApplication.connectedScenes.allObjects.firstObject ? @[] : @[]) {}
+
+        NSArray *windows = nil;
+        NSMutableArray *allWindows = [NSMutableArray array];
+
+        for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+            if (![scene isKindOfClass:UIWindowScene.class]) continue;
+
+            UIWindowScene *windowScene = (UIWindowScene *)scene;
+            [allWindows addObjectsFromArray:windowScene.windows];
         }
-        return nil;
-    } @catch (__unused NSException *exception) {
-        return nil;
-    }
-}
 
-static BOOL WMPFIsMiniProgramMessage(id message) {
-    if (!message) return NO;
+        windows = allWindows;
 
-    NSString *content = WMPFStringField(message, @"m_nsContent");
-    NSString *appId = WMPFStringField(message, @"m_nsAppID");
+        for (UIWindow *window in windows) {
+            [result appendFormat:@"\nWINDOW %@ hidden=%d frame=%@\n",
+             NSStringFromClass(window.class),
+             window.hidden,
+             NSStringFromCGRect(window.frame)];
 
-    return [content containsString:@"<weappinfo>"] ||
-           [content containsString:@"<appmsg"] ||
-           appId.length > 0;
-}
-
-static NSString *WMPFDumpObject(id object) {
-    if (!object) return @"nil";
-
-    NSMutableString *result = [NSMutableString string];
-    [result appendFormat:@"class=%@\n", NSStringFromClass([object class])];
-
-    NSArray *keys = @[
-        @"m_uiMessageType",
-        @"m_nsContent",
-        @"m_nsFromUsr",
-        @"m_nsToUsr",
-        @"m_nsRealChatUsr",
-        @"m_nsAppID",
-        @"m_nsTitle",
-        @"m_nsDesc"
-    ];
-
-    for (NSString *key in keys) {
-        NSString *stringValue = WMPFStringField(object, key);
-        NSString *numberValue = WMPFNumberField(object, key);
-        NSString *value = stringValue ?: numberValue;
-
-        if (value.length > 0) {
-            if (value.length > 500) {
-                value = [[value substringToIndex:500] stringByAppendingString:@"..."];
-            }
-            [result appendFormat:@"%@=%@\n", key, value];
+            WMPFCollectTexts(window, result, 0);
         }
-    }
 
-    return result;
+        WMPFShowResult(result);
+    });
 }
 
 %hook MicroMessengerAppDelegate
@@ -102,7 +125,7 @@ static NSString *WMPFDumpObject(id object) {
     BOOL result = %orig;
 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        WMPFShowAlert(@"WMPF 已加载", @"插件已注入微信。下一步请长按小程序卡片，如果能抓到消息会再弹窗。");
+        NSLog(@"[WMPF] loaded");
     });
 
     return result;
@@ -110,17 +133,14 @@ static NSString *WMPFDumpObject(id object) {
 
 %end
 
-%hook CMessageWrap
+%hook UILongPressGestureRecognizer
 
-- (id)initWithMsgType:(long long)msgType {
-    id result = %orig;
+- (void)setState:(UIGestureRecognizerState)state {
+    %orig;
 
-    if (WMPFIsMiniProgramMessage(result)) {
-        NSString *message = [NSString stringWithFormat:@"msgType=%lld\n%@", msgType, WMPFDumpObject(result)];
-        WMPFShowAlert(@"发现小程序消息", message);
+    if (state == UIGestureRecognizerStateBegan) {
+        WMPFScanVisibleMenu();
     }
-
-    return result;
 }
 
 %end
