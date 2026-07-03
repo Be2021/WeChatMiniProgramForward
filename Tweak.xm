@@ -3,7 +3,14 @@
 
 static void WMPFShowAlert(NSString *title, NSString *message) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        UIViewController *root = UIApplication.sharedApplication.keyWindow.rootViewController;
+UIViewController *root = nil;
+for (UIWindow *window in UIApplication.sharedApplication.windows) {
+    if (window.isKeyWindow) {
+        root = window.rootViewController;
+        break;
+    }
+}
+
         if (!root) return;
 
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
