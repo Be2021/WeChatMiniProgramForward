@@ -1,10 +1,45 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
+static void WMPFShowAlert(NSString *title, NSString *message) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIViewController *root = UIApplication.sharedApplication.keyWindow.rootViewController;
+        if (!root) return;
+
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+                                                                       message:message
+                                                                preferredStyle:UIAlertControllerStyleAlert];
+
+        [alert addAction:[UIAlertAction actionWithTitle:@"复制"
+                                                  style:UIAlertActionStyleDefault
+                                                handler:^(__unused UIAlertAction *action) {
+            UIPasteboard.generalPasteboard.string = message;
+        }]];
+
+        [alert addAction:[UIAlertAction actionWithTitle:@"确定"
+                                                  style:UIAlertActionStyleCancel
+                                                handler:nil]];
+
+        [root presentViewController:alert animated:YES completion:nil];
+    });
+}
+
 static NSString *WMPFStringField(id object, NSString *key) {
     @try {
         id value = [object valueForKey:key];
         return [value isKindOfClass:NSString.class] ? value : nil;
+    } @catch (__unused NSException *exception) {
+        return nil;
+    }
+}
+
+static NSString *WMPFNumberField(id object, NSString *key) {
+    @try {
+        id value = [object valueForKey:key];
+        if ([value isKindOfClass:NSNumber.class]) {
+            return [value description];
+        }
+        return nil;
     } @catch (__unused NSException *exception) {
         return nil;
     }
@@ -21,31 +56,37 @@ static BOOL WMPFIsMiniProgramMessage(id message) {
            appId.length > 0;
 }
 
-static void WMPFDumpObject(id object, NSString *tag) {
-    if (!object) return;
+static NSString *WMPFDumpObject(id object) {
+    if (!object) return @"nil";
 
-    NSLog(@"[WMPF] %@ class=%@", tag, NSStringFromClass([object class]));
+    NSMutableString *result = [NSMutableString string];
+    [result appendFormat:@"class=%@\n", NSStringFromClass([object class])];
 
-    unsigned int count = 0;
-    Ivar *ivars = class_copyIvarList([object class], &count);
+    NSArray *keys = @[
+        @"m_uiMessageType",
+        @"m_nsContent",
+        @"m_nsFromUsr",
+        @"m_nsToUsr",
+        @"m_nsRealChatUsr",
+        @"m_nsAppID",
+        @"m_nsTitle",
+        @"m_nsDesc"
+    ];
 
-    for (unsigned int index = 0; index < count; index++) {
-        const char *ivarName = ivar_getName(ivars[index]);
-        if (!ivarName) continue;
+    for (NSString *key in keys) {
+        NSString *stringValue = WMPFStringField(object, key);
+        NSString *numberValue = WMPFNumberField(object, key);
+        NSString *value = stringValue ?: numberValue;
 
-        NSString *key = [NSString stringWithUTF8String:ivarName];
-
-        @try {
-            id value = [object valueForKey:key];
-
-            if ([value isKindOfClass:NSString.class] ||
-                [value isKindOfClass:NSNumber.class]) {
-                NSLog(@"[WMPF] %@ %@=%@", tag, key, value);
+        if (value.length > 0) {
+            if (value.length > 500) {
+                value = [[value substringToIndex:500] stringByAppendingString:@"..."];
             }
-        } @catch (__unused NSException *exception) {}
+            [result appendFormat:@"%@=%@\n", key, value];
+        }
     }
 
-    if (ivars) free(ivars);
+    return result;
 }
 
 %hook MicroMessengerAppDelegate
@@ -53,7 +94,9 @@ static void WMPFDumpObject(id object, NSString *tag) {
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
     BOOL result = %orig;
 
-    NSLog(@"[WMPF] WeChatMiniProgramForward loaded");
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        WMPFShowAlert(@"WMPF 已加载", @"插件已注入微信。下一步请长按小程序卡片，如果能抓到消息会再弹窗。");
+    });
 
     return result;
 }
@@ -66,8 +109,8 @@ static void WMPFDumpObject(id object, NSString *tag) {
     id result = %orig;
 
     if (WMPFIsMiniProgramMessage(result)) {
-        NSLog(@"[WMPF] mini program message detected msgType=%lld", msgType);
-        WMPFDumpObject(result, @"CMessageWrap");
+        NSString *message = [NSString stringWithFormat:@"msgType=%lld\n%@", msgType, WMPFDumpObject(result)];
+        WMPFShowAlert(@"发现小程序消息", message);
     }
 
     return result;
