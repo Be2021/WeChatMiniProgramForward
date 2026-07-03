@@ -7,7 +7,7 @@ include $(THEOS)/makefiles/common.mk
 TWEAK_NAME = WeChatMiniProgramForward
 
 WeChatMiniProgramForward_FILES = Tweak.xm
-WeChatMiniProgramForward_CFLAGS = -fobjc-arc
+WeChatMiniProgramForward_CFLAGS = -fobjc-arc -Wno-error=deprecated-declarations
 WeChatMiniProgramForward_FRAMEWORKS = UIKit Foundation
 
 include $(THEOS_MAKE_PATH)/tweak.mk
