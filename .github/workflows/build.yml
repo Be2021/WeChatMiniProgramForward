@@ -24,6 +24,9 @@ jobs:
         run: |
           git clone --recursive https://github.com/theos/theos.git $HOME/theos
           echo "THEOS=$HOME/theos" >> $GITHUB_ENV
+          mkdir -p $HOME/theos/toolchain/linux/iphone
+          curl -L -o /tmp/toolchain.tar.xz https://github.com/theos/toolchain/releases/latest/download/linux_iphoneos_arm64e_clang_latest.tar.xz
+          tar -xf /tmp/toolchain.tar.xz -C $HOME/theos/toolchain/linux/iphone
 
       - name: Install iPhoneOS SDK
         run: |
