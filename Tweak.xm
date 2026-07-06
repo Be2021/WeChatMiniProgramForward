@@ -190,7 +190,7 @@ static CGFloat WXRadiusForView(UIView *view) {
     %orig;
 
     @try {
-        WXApplyRound(self, 22.0, NO);
+        WXApplyRound((UIView *)self, 22.0, NO);
     } @catch (__unused NSException *exception) {}
 }
 
@@ -202,7 +202,7 @@ static CGFloat WXRadiusForView(UIView *view) {
     %orig;
 
     @try {
-        WXApplyRound(self, 16.0, YES);
+        WXApplyRound((UIView *)self, 16.0, YES);
     } @catch (__unused NSException *exception) {}
 }
 
