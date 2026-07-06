@@ -1,124 +1,111 @@
 #import <UIKit/UIKit.h>
-#import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 
-static BOOL WXRoundedEnabled = YES;
-
-static BOOL WXClassNameContains(UIView *view, NSArray<NSString *> *keywords) {
-    if (!view) return NO;
-
-    NSString *className = NSStringFromClass(view.class);
-    NSString *superName = NSStringFromClass(view.superview.class);
-
-    for (NSString *keyword in keywords) {
-        if ([className localizedCaseInsensitiveContainsString:keyword]) return YES;
-        if ([superName localizedCaseInsensitiveContainsString:keyword]) return YES;
-    }
-
-    return NO;
+static BOOL WMPFEnabled(void) {
+    return YES;
 }
 
-static BOOL WXIsProbablyAvatar(UIView *view) {
-    if (!view) return NO;
-
-    CGRect frame = view.frame;
-    CGFloat w = frame.size.width;
-    CGFloat h = frame.size.height;
-
-    if (w <= 0 || h <= 0) return NO;
-
-    BOOL squareSmall = fabs(w - h) < 3 && w >= 30 && w <= 70;
-    NSString *className = NSStringFromClass(view.class);
-
-    if (squareSmall &&
-        ([className localizedCaseInsensitiveContainsString:@"Avatar"] ||
-         [className localizedCaseInsensitiveContainsString:@"Head"] ||
-         [className localizedCaseInsensitiveContainsString:@"Contact"])) {
-        return YES;
-    }
-
-    return NO;
+static BOOL WMPFIsMenuWindow(UIWindow *window) {
+    return [NSStringFromClass(window.class) isEqualToString:@"MMMenuWindow"];
 }
 
-static BOOL WXIsProbablyNavigationOrTab(UIView *view) {
-    if (!view) return NO;
+static BOOL WMPFIsMenuItemView(UIView *view) {
+    return [NSStringFromClass(view.class) isEqualToString:@"MMMenuItemView"];
+}
 
-    if ([view isKindOfClass:UINavigationBar.class]) return YES;
-    if ([view isKindOfClass:UITabBar.class]) return YES;
+static UILabel *WMPFFindLabel(UIView *view) {
+    if (!view) return nil;
 
-    NSString *className = NSStringFromClass(view.class);
+    if ([view isKindOfClass:UILabel.class]) {
+        return (UILabel *)view;
+    }
 
-    NSArray *keywords = @[
-        @"Navigation",
-        @"NavBar",
-        @"TabBar",
-        @"StatusBar"
-    ];
+    for (UIView *subview in view.subviews) {
+        UILabel *label = WMPFFindLabel(subview);
+        if (label) return label;
+    }
 
-    for (NSString *keyword in keywords) {
-        if ([className localizedCaseInsensitiveContainsString:keyword]) {
-            return YES;
+    return nil;
+}
+
+static UIViewController *WMPFRootViewController(void) {
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+
+        UIWindowScene *windowScene = (UIWindowScene *)scene;
+        for (UIWindow *window in windowScene.windows) {
+            if (window.isKeyWindow) {
+                UIViewController *root = window.rootViewController;
+                while (root.presentedViewController) {
+                    root = root.presentedViewController;
+                }
+                return root;
+            }
         }
     }
 
-    return NO;
+    return nil;
 }
 
-static void WXApplyRound(UIView *view, CGFloat radius, BOOL clip) {
-    if (!WXRoundedEnabled || !view) return;
-    if (WXIsProbablyAvatar(view)) return;
-    if (WXIsProbablyNavigationOrTab(view)) return;
+static void WMPFShowAlert(NSString *title, NSString *message) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIViewController *root = WMPFRootViewController();
+        if (!root) return;
 
-    view.layer.cornerRadius = radius;
-    view.layer.masksToBounds = clip;
+        UIAlertController *alert =
+            [UIAlertController alertControllerWithTitle:title
+                                                message:message
+                                         preferredStyle:UIAlertControllerStyleAlert];
 
-    if (@available(iOS 13.0, *)) {
-        view.layer.cornerCurve = kCACornerCurveContinuous;
-    }
+        [alert addAction:[UIAlertAction actionWithTitle:@"确定"
+                                                  style:UIAlertActionStyleDefault
+                                                handler:nil]];
+
+        [root presentViewController:alert animated:YES completion:nil];
+    });
 }
 
-static void WXApplySoftShadow(UIView *view) {
+@interface WMPFForwardTarget : NSObject
++ (instancetype)shared;
+- (void)forwardTapped;
+@end
+
+@implementation WMPFForwardTarget
+
++ (instancetype)shared {
+    static WMPFForwardTarget *target = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        target = [WMPFForwardTarget new];
+    });
+    return target;
+}
+
+- (void)forwardTapped {
+    WMPFShowAlert(@"小程序分享可转发", @"已点击“转发”。下一步需要接入微信原生转发流程。");
+}
+
+@end
+
+static void WMPFCollectMenuItems(UIView *view, NSMutableArray<UIView *> *items) {
     if (!view) return;
 
-    view.layer.shadowColor = UIColor.blackColor.CGColor;
-    view.layer.shadowOpacity = 0.08;
-    view.layer.shadowRadius = 8;
-    view.layer.shadowOffset = CGSizeMake(0, 3);
-    view.layer.masksToBounds = NO;
+    if (WMPFIsMenuItemView(view)) {
+        UILabel *label = WMPFFindLabel(view);
+        if (label.text.length > 0) {
+            [items addObject:view];
+        }
+    }
+
+    for (UIView *subview in view.subviews) {
+        WMPFCollectMenuItems(subview, items);
+    }
 }
 
-static BOOL WXShouldRoundView(UIView *view) {
-    if (!view) return NO;
-
-    if (WXIsProbablyAvatar(view)) return NO;
-    if (WXIsProbablyNavigationOrTab(view)) return NO;
-
-    NSString *className = NSStringFromClass(view.class);
-
-    NSArray *keywords = @[
-        @"Bubble",
-        @"Message",
-        @"Msg",
-        @"AppMsg",
-        @"AppMessage",
-        @"Card",
-        @"Link",
-        @"Image",
-        @"Video",
-        @"CellContent",
-        @"ContentView",
-        @"Chat",
-        @"MMMenu",
-        @"MenuItem",
-        @"Input",
-        @"Tool",
-        @"Panel",
-        @"Album",
-        @"Sight"
-    ];
-
-    for (NSString *keyword in keywords) {
-        if ([className localizedCaseInsensitiveContainsString:keyword]) {
+static BOOL WMPFMenuHasTitle(NSArray<UIView *> *items, NSString *title) {
+    for (UIView *item in items) {
+        UILabel *label = WMPFFindLabel(item);
+        if ([label.text isEqualToString:title]) {
             return YES;
         }
     }
@@ -126,173 +113,159 @@ static BOOL WXShouldRoundView(UIView *view) {
     return NO;
 }
 
-static CGFloat WXRadiusForView(UIView *view) {
-    NSString *className = NSStringFromClass(view.class);
+static UIView *WMPFFindLikelyContainer(NSArray<UIView *> *items) {
+    NSMutableDictionary<NSValue *, NSNumber *> *counter = [NSMutableDictionary dictionary];
 
-    if ([className localizedCaseInsensitiveContainsString:@"MMMenu"]) {
-        return 18.0;
+    for (UIView *item in items) {
+        UIView *superview = item.superview;
+        if (!superview) continue;
+
+        NSValue *key = [NSValue valueWithNonretainedObject:superview];
+        counter[key] = @([counter[key] integerValue] + 1);
     }
 
-    if ([className localizedCaseInsensitiveContainsString:@"MenuItem"]) {
-        return 14.0;
+    UIView *best = nil;
+    NSInteger bestCount = 0;
+
+    for (NSValue *key in counter) {
+        NSInteger count = counter[key].integerValue;
+        if (count > bestCount) {
+            bestCount = count;
+            best = key.nonretainedObjectValue;
+        }
     }
 
-    if ([className localizedCaseInsensitiveContainsString:@"Bubble"]) {
-        return 18.0;
-    }
-
-    if ([className localizedCaseInsensitiveContainsString:@"AppMsg"] ||
-        [className localizedCaseInsensitiveContainsString:@"Card"] ||
-        [className localizedCaseInsensitiveContainsString:@"Link"]) {
-        return 16.0;
-    }
-
-    if ([className localizedCaseInsensitiveContainsString:@"Image"] ||
-        [className localizedCaseInsensitiveContainsString:@"Video"] ||
-        [className localizedCaseInsensitiveContainsString:@"Sight"]) {
-        return 14.0;
-    }
-
-    if ([className localizedCaseInsensitiveContainsString:@"Input"] ||
-        [className localizedCaseInsensitiveContainsString:@"Tool"] ||
-        [className localizedCaseInsensitiveContainsString:@"Panel"]) {
-        return 18.0;
-    }
-
-    return 14.0;
+    return best;
 }
 
-%hook UIView
+static UIView *WMPFCloneMenuItem(UIView *sourceItem) {
+    if (!sourceItem) return nil;
 
-- (void)layoutSubviews {
-    %orig;
-
-    if (!WXRoundedEnabled) return;
+    NSData *data = nil;
+    UIView *newItem = nil;
 
     @try {
-        if (!WXShouldRoundView(self)) return;
+        data = [NSKeyedArchiver archivedDataWithRootObject:sourceItem
+                                     requiringSecureCoding:NO
+                                                     error:nil];
 
-        CGRect frame = self.frame;
-        if (frame.size.width < 20 || frame.size.height < 20) return;
-        if (frame.size.width > UIScreen.mainScreen.bounds.size.width + 20) return;
+        newItem = [NSKeyedUnarchiver unarchivedObjectOfClass:UIView.class
+                                                    fromData:data
+                                                       error:nil];
+    } @catch (__unused NSException *exception) {
+        newItem = nil;
+    }
 
-        CGFloat radius = WXRadiusForView(self);
-        WXApplyRound(self, radius, YES);
-
-    } @catch (__unused NSException *exception) {}
+    return newItem;
 }
 
-%end
+static void WMPFInjectForwardButton(UIWindow *menuWindow) {
+    if (!WMPFEnabled()) return;
+    if (!WMPFIsMenuWindow(menuWindow)) return;
+
+    NSMutableArray<UIView *> *items = [NSMutableArray array];
+    WMPFCollectMenuItems(menuWindow, items);
+
+    if (items.count == 0) return;
+
+    // 如果微信本身已经有“转发”，就不重复加
+    if (WMPFMenuHasTitle(items, @"转发")) return;
+
+    UIView *sourceItem = nil;
+
+    // 优先复制“从当前听”这一类第二排菜单项
+    for (UIView *item in items) {
+        UILabel *label = WMPFFindLabel(item);
+        if ([label.text isEqualToString:@"从当前听"]) {
+            sourceItem = item;
+            break;
+        }
+    }
+
+    // 没找到就复制最后一个
+    if (!sourceItem) {
+        sourceItem = items.lastObject;
+    }
+
+    UIView *container = WMPFFindLikelyContainer(items);
+    if (!container || !sourceItem) return;
+
+    UIView *forwardItem = WMPFCloneMenuItem(sourceItem);
+    if (!forwardItem) return;
+
+    UILabel *label = WMPFFindLabel(forwardItem);
+    if (label) {
+        label.text = @"转发";
+    }
+
+    CGRect frame = sourceItem.frame;
+
+    // 默认放到 sourceItem 右边
+    frame.origin.x += frame.size.width + 8;
+
+    // 如果超出容器右边，则放到下一行左边
+    CGFloat maxX = CGRectGetMaxX(frame);
+    if (maxX > container.bounds.size.width - 8) {
+        frame.origin.x = sourceItem.frame.origin.x;
+        frame.origin.y += frame.size.height + 10;
+    }
+
+    forwardItem.frame = frame;
+    forwardItem.userInteractionEnabled = YES;
+
+    UITapGestureRecognizer *tap =
+        [[UITapGestureRecognizer alloc] initWithTarget:[WMPFForwardTarget shared]
+                                                action:@selector(forwardTapped)];
+
+    [forwardItem addGestureRecognizer:tap];
+
+    [container addSubview:forwardItem];
+}
+
+static void WMPFTryInjectAllMenuWindows(void) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+            if (![scene isKindOfClass:UIWindowScene.class]) continue;
+
+            UIWindowScene *windowScene = (UIWindowScene *)scene;
+
+            for (UIWindow *window in windowScene.windows) {
+                if (WMPFIsMenuWindow(window)) {
+                    WMPFInjectForwardButton(window);
+                }
+            }
+        }
+    });
+}
 
 %hook MMMenuWindow
 
+- (void)didAddSubview:(UIView *)subview {
+    %orig;
+    WMPFTryInjectAllMenuWindows();
+}
+
 - (void)layoutSubviews {
     %orig;
-
-    @try {
-        WXApplyRound((UIView *)self, 22.0, NO);
-    } @catch (__unused NSException *exception) {}
+    WMPFTryInjectAllMenuWindows();
 }
 
 %end
 
-%hook MMMenuItemView
+%hook UILongPressGestureRecognizer
 
-- (void)layoutSubviews {
+- (void)setState:(UIGestureRecognizerState)state {
     %orig;
 
-    @try {
-        WXApplyRound((UIView *)self, 16.0, YES);
-    } @catch (__unused NSException *exception) {}
-}
-
-%end
-
-%hook UITableViewCell
-
-- (void)layoutSubviews {
-    %orig;
-
-    @try {
-        NSString *className = NSStringFromClass(self.class);
-
-        if ([className localizedCaseInsensitiveContainsString:@"Chat"] ||
-            [className localizedCaseInsensitiveContainsString:@"Message"] ||
-            [className localizedCaseInsensitiveContainsString:@"Msg"] ||
-            [className localizedCaseInsensitiveContainsString:@"Session"]) {
-
-            UIView *content = self.contentView;
-            WXApplyRound(content, 14.0, NO);
-        }
-
-    } @catch (__unused NSException *exception) {}
-}
-
-%end
-
-%hook UIImageView
-
-- (void)layoutSubviews {
-    %orig;
-
-    @try {
-        if (WXIsProbablyAvatar(self)) return;
-
-        CGRect frame = self.frame;
-        if (frame.size.width < 40 || frame.size.height < 40) return;
-
-        NSString *className = NSStringFromClass(self.superview.class);
-
-        if ([className localizedCaseInsensitiveContainsString:@"Message"] ||
-            [className localizedCaseInsensitiveContainsString:@"Msg"] ||
-            [className localizedCaseInsensitiveContainsString:@"Image"] ||
-            [className localizedCaseInsensitiveContainsString:@"App"] ||
-            [className localizedCaseInsensitiveContainsString:@"Card"] ||
-            [className localizedCaseInsensitiveContainsString:@"Chat"]) {
-
-            WXApplyRound(self, 14.0, YES);
-        }
-
-    } @catch (__unused NSException *exception) {}
-}
-
-%end
-
-%hook UIButton
-
-- (void)layoutSubviews {
-    %orig;
-
-    @try {
-        NSString *title = self.currentTitle ?: self.titleLabel.text;
-        NSString *className = NSStringFromClass(self.class);
-        NSString *superName = NSStringFromClass(self.superview.class);
-
-        BOOL shouldRound = NO;
-
-        if (title.length > 0) {
-            shouldRound = YES;
-        }
-
-        if ([className localizedCaseInsensitiveContainsString:@"Button"] &&
-            ([superName localizedCaseInsensitiveContainsString:@"Tool"] ||
-             [superName localizedCaseInsensitiveContainsString:@"Panel"] ||
-             [superName localizedCaseInsensitiveContainsString:@"Menu"])) {
-            shouldRound = YES;
-        }
-
-        if (shouldRound) {
-            CGRect frame = self.frame;
-            if (frame.size.width >= 30 && frame.size.height >= 24) {
-                WXApplyRound(self, MIN(frame.size.height / 2.0, 18.0), YES);
-            }
-        }
-
-    } @catch (__unused NSException *exception) {}
+    if (state == UIGestureRecognizerStateBegan ||
+        state == UIGestureRecognizerStateChanged ||
+        state == UIGestureRecognizerStateEnded) {
+        WMPFTryInjectAllMenuWindows();
+    }
 }
 
 %end
 
 %ctor {
-    NSLog(@"[WXRounded] 微信圆角美化插件已加载");
+    NSLog(@"[WMPF] 小程序分享可转发 UI 注入版 loaded");
 }
