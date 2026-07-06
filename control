@@ -1,9 +1,9 @@
-Package: com.Dz.WXYJ
-Name: WeChatMiniProgramForward
+Package: com.local.wechatrounded
+Name: WeChatRounded
 Version: 0.0.1
 Architecture: iphoneos-arm64
-Description: WeChat mini program forward probe for rootless Dopamine
-Maintainer: Dz
-Author: Dz
+Description: WeChat rounded UI tweak for rootless Dopamine
+Maintainer: local
+Author: local
 Section: Tweaks
 Depends: firmware (>= 15.0), ellekit
