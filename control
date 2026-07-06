@@ -1,9 +1,9 @@
-Package: com.local.wechatrounded
-Name: WeChatRounded
+Package: com.local.wechatminiprogramforward
+Name: WeChatMiniProgramForward
 Version: 0.0.1
 Architecture: iphoneos-arm64
-Description: WeChat rounded UI tweak for rootless Dopamine
+Description: Add forward button for WeChat mini program card menu
 Maintainer: local
 Author: local
 Section: Tweaks
-Depends: firmware (>= 15.0), ellekit
+Depends: firmware (>= 15.0)
